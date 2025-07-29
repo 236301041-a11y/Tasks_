@@ -1,0 +1,49 @@
+import hashlib
+from difflib import SequenceMatcher
+from typing import Dict
+
+class DataRedundancyRemover:
+    def __init__(self, similarity_threshold=0.90):
+        self.cloud_database: Dict[str, str] = {}
+        self.similarity_threshold = similarity_threshold
+        self.recent_hash_cache = set()
+
+    def generate_hash(self, data: str) -> str:
+        """Create a unique SHA-256 hash for each data entry."""
+        return hashlib.sha256(data.encode('utf-8')).hexdigest()
+
+    def is_similar(self, data1: str, data2: str) -> bool:
+        """Compare two strings to detect near-duplicate content."""
+        similarity_ratio = SequenceMatcher(None, data1, data2).ratio()
+        return similarity_ratio >= self.similarity_threshold
+
+    def validate_data(self, new_data: str) -> bool:
+        """Validate incoming data against existing entries."""
+        new_hash = self.generate_hash(new_data)
+
+        if new_hash in self.recent_hash_cache:
+            print("[CACHE] Duplicate detected in recent submissions.")
+            return False
+
+        for existing_hash, existing_data in self.cloud_database.items():
+            if new_hash == existing_hash or self.is_similar(existing_data, new_data):
+                print("[DB] Duplicate or false positive found.")
+                return False
+
+        return True
+
+    def append_unique_data(self, data: str):
+        """Append only verified and unique data to the database."""
+        data_hash = self.generate_hash(data)
+        self.cloud_database[data_hash] = data
+        self.recent_hash_cache.add(data_hash)
+        print("[SUCCESS] Unique data appended to the cloud database.")
+
+    def process_data_entry(self, data: str):
+        """Main handler for data validation and insertion."""
+        print(f"\n[INPUT] Processing: {data}")
+        if self.validate_data(data):
+            self.append_unique_data(data)
+        else:
+            print("[SKIPPED] Entry rejected due to redundancy.")
+

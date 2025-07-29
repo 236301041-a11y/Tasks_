@@ -1,0 +1,61 @@
+from flask import Flask, request, jsonify
+from uuid import uuid4
+import random
+
+app = Flask(__name__)
+
+# Simulated cloud servers (mock provisioning)
+active_servers = []
+
+def provision_server():
+    server_id = f"server-{uuid4().hex[:6]}"
+    active_servers.append(server_id)
+    print(f"[+] Provisioned new server: {server_id}")
+    return server_id
+
+# Simulate ticket database
+tickets_db = {}
+
+# Pricing logic
+BASE_PRICE = 50
+
+def calculate_price(distance_km, peak_hour=False):
+    price = BASE_PRICE + distance_km * 1.2
+    if peak_hour:
+        price *= 1.5
+    return round(price, 2)
+
+@app.route('/book', methods=['POST'])
+def book_ticket():
+    data = request.json
+    user_id = data.get("user_id")
+    distance = data.get("distance_km")
+    peak_hour = data.get("peak_hour", False)
+
+    price = calculate_price(distance, peak_hour)
+    ticket_id = str(uuid4())
+    server_id = provision_server()
+
+    tickets_db[ticket_id] = {
+        "user_id": user_id,
+        "price": price,
+        "server": server_id
+    }
+
+    return jsonify({
+        "ticket_id": ticket_id,
+        "price": price,
+        "server": server_id
+    })
+
+@app.route('/validate', methods=['GET'])
+def validate_ticket():
+    ticket_id = request.args.get("ticket_id")
+    ticket = tickets_db.get(ticket_id)
+
+    if not ticket:
+        return jsonify({"error": "Invalid or stolen ticket"}), 404
+    return jsonify(ticket)
+
+if __name__ == '__main__':
+    app.run(debug=True)

@@ -1,0 +1,74 @@
+from flask import Flask, request, jsonify
+import sqlite3
+import hashlib
+import base64
+from Crypto.Cipher import AES # pyright: ignore[reportMissingImports]
+from Crypto.Random import get_random_bytes # type: ignore
+
+app = Flask(__name__)
+DB_NAME = "secure_users.db"
+CAPABILITY_CODE = "SAFE_SQL_2025"  # Hardcoded for demo purposes
+AES_KEY = hashlib.sha256(b"MyStrongPassphrase").digest()
+
+# --- AES-256 Encryption / Decryption ---
+def encrypt_data(data: str) -> str:
+    cipher = AES.new(AES_KEY, AES.MODE_EAX)
+    ciphertext, tag = cipher.encrypt_and_digest(data.encode())
+    return base64.b64encode(cipher.nonce + tag + ciphertext).decode()
+
+def decrypt_data(encoded_data: str) -> str:
+    raw = base64.b64decode(encoded_data)
+    nonce, tag, ciphertext = raw[:16], raw[16:32], raw[32:]
+    cipher = AES.new(AES_KEY, AES.MODE_EAX, nonce)
+    return cipher.decrypt_and_verify(ciphertext, tag).decode()
+
+# --- Database Setup ---
+def init_db():
+    with sqlite3.connect(DB_NAME) as conn:
+        conn.execute("""CREATE TABLE IF NOT EXISTS users (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        username TEXT NOT NULL,
+                        password TEXT NOT NULL)""")
+        conn.commit()
+
+@app.route("/add_user", methods=["POST"])
+def add_user():
+    data = request.json
+    username = data.get("username")
+    password = data.get("password")
+    if not username or not password:
+        return jsonify({"error": "Missing credentials"}), 400
+
+    encrypted_password = encrypt_data(password)
+    with sqlite3.connect(DB_NAME) as conn:
+        cursor = conn.cursor()
+        cursor.execute("INSERT INTO users (username, password) VALUES (?, ?)",
+                       (username, encrypted_password))
+        conn.commit()
+    return jsonify({"message": "User added securely"}), 201
+
+@app.route("/query_user", methods=["POST"])
+def query_user():
+    data = request.json
+    capability = data.get("capability_code")
+    query = data.get("query")
+    
+    if capability != CAPABILITY_CODE:
+        return jsonify({"error": "Unauthorized access"}), 403
+
+    try:
+        with sqlite3.connect(DB_NAME) as conn:
+            cursor = conn.cursor()
+            if query.strip().lower().startswith("select"):
+                cursor.execute(query)
+                rows = cursor.fetchall()
+                return jsonify({"result": rows}), 200
+            else:
+                return jsonify({"error": "Only SELECT statements are allowed"}), 400
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+# --- Entry Point ---
+if __name__ == "__main__":
+    init_db()
+    app.run(host="0.0.0.0", port=5000)
